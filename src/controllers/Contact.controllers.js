@@ -93,7 +93,7 @@ const createContactUs = asyncHandler(async (req, res) => {
 </html>
 `;
 
-    await mailsend(email, "Contact Us Message Confirmation", html);
+    console.log(await mailsend(email, "Contact Us Message Confirmation", html));
 
     // mail send to admin for Contact-Us message details
 

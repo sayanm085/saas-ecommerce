@@ -63,6 +63,20 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Product' // Reference to the Product model (assumed you have a Product schema)
       }],
+
+      otp: {
+        type: Number,
+        required: false
+      },
+      otpExpires: {
+        type: Date,
+        required: false
+      },
+      isVerified: {
+        type: Boolean,
+        default: false
+      },
+
       // cart: [{
       //   productId: {
       //     type: Schema.Types.ObjectId,
@@ -95,6 +109,8 @@ userSchema.pre("save", async function (next){ // encrypt password before saving
 // user model methods start here
 
 userSchema.methods.verifyPassword= async function(password){ // Verify Password methods
+  console.log(password);
+  console.log(this.password);
     return await bcrypt.compare(password, this.password);
 }
 

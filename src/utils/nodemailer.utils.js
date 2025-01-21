@@ -1,21 +1,22 @@
 import nodemailer from 'nodemailer';
-
+import dotenv from 'dotenv';
+dotenv.config();
 
 const mailsend = async (to, subject, html) => {
 
     const transporter = nodemailer.createTransport({
         service: 'Zoho Mail',
-        port: 465,               // true for 465, false for other ports
-        host: "***********",
+        port: process.env.SMTP_PORT,               // true for 465, false for other ports
+        host: process.env.SMTP_HOST,
         secure: true, // true for 465, false for other ports
         auth: {
-            user: "************",
-            pass: "*************"
+            user: process.env.SMTP_USERNAME,
+            pass: process.env.SMTP_PASSWORD
         }
     });
 
     const mailOptions = {
-        from: '**************',
+        from: process.env.EMAIL_FROM,
         to: to,
         subject: subject,
         html: html
@@ -23,7 +24,7 @@ const mailsend = async (to, subject, html) => {
 
     try {
         const result = await transporter.sendMail(mailOptions);
-        return result;
+        return result.messageId;
     } catch (error) {
         return error;
     }

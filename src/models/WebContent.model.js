@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-
+import redisClient from "../db/Radis.db.js";
 const webContentSchema = new mongoose.Schema(
   {
     hero: {
@@ -71,6 +71,23 @@ const webContentSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// 🔥 Auto-remove Redis cache when WebContent is updated
+webContentSchema.pre("save", async function (next) {
+  const cacheKey = `webcontent:${this._id}`;
+  await redisClient.del(cacheKey);
+  console.log(`✅ Redis cache cleared for updated WebContent: ${this._id}`);
+  next();
+});
+
+// 🔥 Auto-remove Redis cache when WebContent is deleted
+webContentSchema.post("findOneAndDelete", async function (doc) {
+  if (doc) {
+    const cacheKey = `webcontent:${doc._id}`;
+    await redisClient.del(cacheKey);
+    console.log(`❌ Redis cache cleared for deleted WebContent: ${doc._id}`);
+  }
+});
 
 const WebContent = mongoose.model("WebContent", webContentSchema);
 export default WebContent;

@@ -1,8 +1,5 @@
 // Code to handle async errors in express routes
 
-import e from "express";
-
-
 const asyncHandler = (requestHandler) => {
   return async (req, res, next) => {
     try {

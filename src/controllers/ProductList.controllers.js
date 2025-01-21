@@ -5,7 +5,8 @@ import {ApiResponse} from '../utils/ApiResponse.js';
 import uploadImage from '../utils/cloudinary.js';
 import Review from '../models/Review.model.js';
 import order from '../models/Order.model.js';
-
+import redisClient from '../db/Radis.db.js';
+import Fuse from 'fuse.js';
 
 // add product to database and upload images to cloudinary  
 
@@ -193,7 +194,7 @@ const productReview = asyncHandler(async (req, res) => {
     try {
         const { id: productId } = req.params;
         // const userId = req.user.id
-        const userId = req.body.userId;
+        const userId = req.user.id;
         const { rating, comment } = req.body;
         const reviewImg = req.files?.reviewImg || [];
 
@@ -250,7 +251,7 @@ const productReview = asyncHandler(async (req, res) => {
 
 const productReviewDelete = asyncHandler(async (req, res) => {
     const { id: reviewId } = req.params;
-    const { userId } = req.body;
+    const userId = req.user.id;
 
     try {
         const review = await Review.findOneAndDelete({ _id: reviewId, userId });
@@ -283,7 +284,7 @@ const productReviewDelete = asyncHandler(async (req, res) => {
 });
 
 
-// const productReviewUpdate = asyncHandler(async (req, res) => {
+ const productReviewUpdate = asyncHandler(async (req, res) => {
 //     const { id: reviewId } = req.params;
 //     const { userId, rating, comment } = req.body;
 //     const reviewImg = req.files?.reviewImg || [];
@@ -329,11 +330,136 @@ const productReviewDelete = asyncHandler(async (req, res) => {
 //     } catch (err) {
 //         res.status(500).json(new ApiResponse(500, err.message, 'Server error'));
 //     }
-// });
+});
+
+
+
+//*🔍 roduct Search, Sort, Filter, and Pagination API 
+
+const productSearch = asyncHandler(async (req, res) => {
+    const { search, category, tags, sortBy, rating, sortOrder, page, limit } = req.query;
+    const query = {};
+    const sort = {};
+    const pageNum = parseInt(page, 10) || 1;
+    const pageSize = parseInt(limit, 10) || 10;
+
+    // 🔍 Build Redis Cache Key
+    const cacheKey = `search:${JSON.stringify(req.query)}`;
+
+    // 🔥 Check if data exists in Redis cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+        console.log("✅ Returning cached search results");
+        return res.json(new ApiResponse(200, JSON.parse(cachedData), "Products retrieved from cache"));
+    }
+
+    // 🛒 Build Query for MongoDB
+    if (search) {
+        // Fuzzy search with Fuse.js for better handling of typos
+        const productsInDb = await Product.find({}); // Fetch all products (can be optimized)
+        const fuse = new Fuse(productsInDb, {
+            keys: ["name", "title", "description", "category", "tags"],
+            threshold: 0.3, // Lower threshold for better matches
+        });
+
+        const fuzzyResults = fuse.search(search);
+        const ids = fuzzyResults.map(result => result.item._id);
+
+        if (ids.length) {
+            query._id = { $in: ids }; // Fetch products based on fuzzy matches
+        } else {
+            return res.json(new ApiResponse(200, [], "No matches found"));
+        }
+    }
+
+    if (category) query.category = category;
+    if (tags) query.tags = { $in: tags.split(",") };
+    if (rating) query.reviewavg = { $gte: rating };
+    if (sortBy) sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+
+    // 📌 Pagination Options
+    const options = { sort, page: pageNum, limit: pageSize };
+
+    try {
+        // 📌 Fetch Data from MongoDB
+        const products = await Product.paginate(query, options);
+
+        const newProducts = products.docs.map((product) => ({
+            id: product._id,
+            name: product.name,
+            title: product.title,
+            price: product.price,
+            category: product.category,
+            tags: product.tags,
+            stock: product.stock,
+            image: product.image,
+            reviewavg: product.reviewavg,
+        }));
+
+        const configProduct = {
+            totalDocs: products.totalDocs,
+            totalPages: products.totalPages,
+            page: products.page,
+            limit: products.limit,
+            hasPrevPage: products.hasPrevPage,
+            hasNextPage: products.hasNextPage,
+            nextPage: products.nextPage,
+            prevPage: products.prevPage,
+        };
+
+        const responseData = { newProducts, configProduct };
+
+        // 🔥 Store results in Redis cache (Auto-remove after 10 minutes)
+        await redisClient.setEx(cacheKey, 600, JSON.stringify(responseData));
+        console.log("✅ Search results stored in Redis cache");
+
+        // 📌 Send Response
+        res.json(new ApiResponse(200, responseData, "Products retrieved successfully"));
+    } catch (err) {
+        console.error("Error in product search:", err);
+        res.status(500).json(new ApiResponse(500, err.message, "Server error"));
+    }
+});
+
+
+
+// single product details fetch
+
+const productDetails = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    try {
+
+       // Check if the product is cached in Redis
+        const cacheKey = `product:${id}`;
+        const cachedProduct = await redisClient.get(cacheKey);
+
+        if (cachedProduct) {
+            return res.json(new ApiResponse(200, JSON.parse(cachedProduct), "Product retrieved successfully (Cached)"));
+        }
+
+        // Fetch the product from the database if not cached 
+        const product = await Product.findById(id)
+            .select("name title description details features livePreview price category tags stock image reviewavg reviewcount likeSummary reviewIds")
+            .populate({ path: 'reviewIds', select: 'rating comment imageUrls userId', populate: { path: 'userId', select: 'fullName' }})
+            .lean();
+
+        if (!product) {
+            return res.status(404).json(new ApiResponse(404, 'Product not found'));
+        }
+       // 🔥 Store product in Redis with a 15-minute expiry
+       await redisClient.setEx(cacheKey, 60 * 15, JSON.stringify(product)); // 15 minutes; // 300 seconds = 5 minutes
+
+        res.json(new ApiResponse(200, product, 'Product retrieved successfully'));
+
+
+    } catch (err) {
+        res.status(500).json(new ApiResponse(500, err.message, 'Server error'));
+    }
+});
 
 
 
 
 
-
-export { productUpload, productUpdate, productDelete,productLike,productReview,productReviewDelete };
+export { productUpload, productUpdate, productDelete,productLike,productReview,productReviewDelete,productSearch,productDetails };

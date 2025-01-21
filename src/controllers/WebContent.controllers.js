@@ -2,6 +2,7 @@ import WebContent  from '../models/WebContent.model.js';
 import {asyncHandler} from '../utils/asyncHandler.js';
 import {ApiResponse} from '../utils/ApiResponse.js';
 import uploadImage from '../utils/cloudinary.js';
+import redisClient from '../db/Radis.db.js';
 
 // Hero Content update data  controller
 const updateHeroContent = asyncHandler(async (req, res, next) => {
@@ -10,7 +11,7 @@ const updateHeroContent = asyncHandler(async (req, res, next) => {
     const heroImageFile = req.files?.heroImage?.[0]?.path || null;
 
     // Retrieve the existing WebContent
-    const webContent = await WebContent.findById('674de9d4a2c15b0876c21be5');
+    const webContent = await WebContent.findById('674efd6a7d4788194ecd519a');
     if (!webContent) {
       return next(new ApiResponse(400, "WebContent not found", "WebContent not found"));
     }
@@ -508,19 +509,47 @@ const WebContentcreate = asyncHandler(async(req, res) => {
 
 // Retrieve and return all WebContent from the database.
 
-const WebContentget = asyncHandler(async(req, res) => {
-  //get all the data from the database
-  let data = await WebContent.findById('674efd6a7d4788194ecd519a')
+const WebContentget = asyncHandler(async (req, res) => {
+  const cacheKey = "webcontent:674efd6a7d4788194ecd519a";
 
-  // let data1 =  data.BrandPartners.pull({ _id: '674efd6a7d4788194ecd519b' })
+  try {
+    // 🔥 Check if data is in Redis cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        status: "success",
+        data: JSON.parse(cachedData),
+        message: "WebContent retrieved successfully (cached)",
+      });
+    }
 
-  //send the response to the user
-  res.status(200).json({
-    status: "success",
-    data: data,
-    message: "WebContent retrieved successfully",
-  });
+    // 🔥 Fetch from database if not in cache
+    const data = await WebContent.findById("674efd6a7d4788194ecd519a").lean();
+
+    if (!data) {
+      return res.status(404).json({
+        status: "error",
+        message: "WebContent not found",
+      });
+    }
+
+    // 🔥 Store result in Redis (auto-remove after 1 months)
+    await redisClient.setEx(cacheKey, 2592000, JSON.stringify(data));
+
+    res.status(200).json({
+      status: "success",
+      data: data,
+      message: "WebContent retrieved successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error fetching WebContent:", error.message);
+    res.status(500).json({
+      status: "error",
+      message: "Server error",
+    });
+  }
 });
+
 
 // Create and Save a new WebContent
 

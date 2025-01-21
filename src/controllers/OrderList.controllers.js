@@ -7,17 +7,18 @@ import Product from '../models/Product.model.js';
 import Coupon from '../models/DiscountCoupon.model.js';
 import crypto from 'crypto';
 import mailsend from "../utils/nodemailer.utils.js";
+import {RAZORPAY_KEY_ID,RAZORPAY_KEY_SECRET} from '../constants.js'
 
 
 const razorpay = new Razorpay({
-    key_id: "**************",
-    key_secret: "**************"
+    key_id:RAZORPAY_KEY_ID,
+    key_secret:RAZORPAY_KEY_SECRET
 });
 
 
 const createOrder = asyncHandler(async (req, res) => {
     const { products, DiscountCoupon, paymentType, shippingAddress } = req.body;
-    const userId = "67481334e25ca81f16ab5d48";
+    const userId = req.user._id;
     
 
     // Parallelize user and product validation
@@ -139,8 +140,6 @@ const ordervarify = asyncHandler(async (req, res) => {
 // Code to verify the order
 const {razorpay_payment_id, razorpay_order_id, razorpay_signature,orderId} = req.body;
 
-console.log(razorpay_payment_id, razorpay_order_id, razorpay_signature);
-
 
 
 const order = await Order.findOne({orderId: orderId});
@@ -149,7 +148,7 @@ if(!order) {
     throw new Error('Order not found');
 }
 
-const key_secret = 'vP70TYiJruIcQ0CMM6ecN6eA';
+const key_secret = RAZORPAY_KEY_SECRET;
 const generated_signature = crypto.createHmac('sha256', key_secret)
 .update(razorpay_order_id + '|' + razorpay_payment_id)
 .digest('hex');
@@ -309,8 +308,6 @@ res.status(200).json(new ApiResponse(200, order, 'Order verified successfully' )
 </html>
 `;
 
-        console.log(user.email);
-
        await mailsend(user.email, 'Order Confirmation',html,);
 
 
@@ -322,34 +319,40 @@ res.status(200).json(new ApiResponse(200, order, 'Order verified successfully' )
 
 });
 
-
-
-
+// Get all orders for user only
 const getOrders = asyncHandler(async (req, res) => {
-   // user can get all orders
-   const userId = req.body.userId;
-   const userallorders = await User.findById(userId).populate('orders').lean();
-    if(!userallorders) {
-         res.status(404);
-         throw new Error('User not found');
+    const userId = req.user._id;
+  
+    // 🔥 Fetch orders directly without extra user query
+    const orders = await Order.find({ user: userId })
+      .select("-sensitiveField") // Exclude sensitive fields if needed
+      .lean();
+  
+    if (!orders.length) {
+      return res.status(404).json(new ApiResponse(404, [], 'No orders found'));
     }
-    const orders = userallorders;
-
-    console.log(orders);
-
-
-    // Return the response
-    res.status(200).json(new ApiResponse(200, 'Orders fetched successfully', orders));
+  
+    // ✅ Send response immediately
+    res.status(200).json(new ApiResponse(200, orders, 'Orders fetched successfully'));
 });
+  
 
+// Get order by id for user only  
 const getOrderById = asyncHandler(async (req, res) => {
-    // Code to fetch order by ID
-    // ...
-    // ...
-    // ...
-    // Return the response
-    res.status(200).json(new ApiResponse(200, 'Order fetched successfully', order));
+    const userId = req.user._id;
+    const orderId = req.params.id;
+  
+    // Fetch order directly while ensuring it belongs to the user
+    const order = await Order.findOne({ _id: orderId, user: userId }).lean();
+  
+    if (!order) {
+      return res.status(404).json(new ApiResponse(404, null, 'Order not found'));
+    }
+  
+    // Send response immediately
+    res.status(200).json(new ApiResponse(200, order, 'Order fetched successfully'));
 });
+  
 
 
 export {createOrder,ordervarify, getOrders, getOrderById};
